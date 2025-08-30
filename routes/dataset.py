@@ -79,3 +79,30 @@ async def delete_dataset(dataset_id: str):
     - Confirmation message
     """
     return await dataset_controller.delete_dataset(dataset_id)
+
+
+@router.get("/{dataset_id}/summary", response_model=Dict[str, Any])
+async def get_ai_dataset_summary(dataset_id: str):
+    """
+    Generate or retrieve AI-powered dataset summary.
+    
+    This endpoint:
+    - Generates a comprehensive paragraph-style summary using AI
+    - Saves the summary to Firebase for future use (caching)
+    - Returns cached summary if already generated
+    
+    The summary includes insights about:
+    - Dataset purpose and classification
+    - Machine learning opportunities
+    - Business value and ROI potential
+    
+    - **dataset_id**: Unique identifier for the dataset
+    
+    Returns:
+    - dataset_id: The dataset identifier
+    - summary: Paragraph-style AI-generated summary
+    - summary_generated_at: Timestamp when summary was created
+    - cached: Boolean indicating if this is a cached response
+    - message: Status message (only for new summaries)
+    """
+    return await dataset_controller.get_ai_dataset_summary(dataset_id)
