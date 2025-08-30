@@ -4,9 +4,12 @@ from dotenv import load_dotenv
 # Load the environment variables from the .env file
 load_dotenv()
 
+# OpenAI API configuration
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+
 # LLM configs
-LLM_MODEL_GTP_3_5_TURBO = os.environ.get('LLM_MODEL_GTP_3_5_TURBO')
-LLM_MODEL_GTP_4_O = os.environ.get('LLM_MODEL_GTP_4_O')
+LLM_MODEL_GTP_3_5_TURBO = os.environ.get('LLM_MODEL_GTP_3_5_TURBO', 'gpt-3.5-turbo')
+LLM_MODEL_GTP_4_O = os.environ.get('LLM_MODEL_GTP_4_O', 'gpt-4')
 
 # Set the default and fallback LLM models
 LLM_MODEL_DEFAULT = LLM_MODEL_GTP_4_O
