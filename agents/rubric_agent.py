@@ -40,6 +40,7 @@ class RubricAgent:
                     "id": "", // uuid
                     "name": "", // Name of the criterion
                     "weight": "", // It will be out of 100
+                    "description": "", // Detailed description of the criterion to evaluate against the given application, project, submission, etc.
                     "levels": [
                         {
                             "level": 1,
