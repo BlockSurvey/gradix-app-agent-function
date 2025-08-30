@@ -178,3 +178,6 @@ uploads/
 
 # Config files
 config/
+
+# Serena
+.serena/
