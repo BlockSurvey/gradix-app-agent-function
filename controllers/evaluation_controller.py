@@ -267,12 +267,6 @@ class EvaluationController:
         return "Application needs significant improvement to meet requirements."
 
     async def _store_evaluation_results(self, results: Dict[str, Any]) -> None:
-        """
-        Store evaluation results in the database.
-        
-        Args:
-            results: The evaluation results to store
-        """
         try:
             result_id = str(uuid.uuid4())
             results_doc = {
@@ -282,11 +276,8 @@ class EvaluationController:
             }
             
             self.db.collection(self.results_collection).document(result_id).set(results_doc)
-            bs_logger.info(
-                "Stored evaluation results for application %s with result ID %s",
-                results.get("application_id"),
-                result_id
-            )
+
+            print(f"Evaluation results stored successfully: ------------------")
         except Exception as e:
             bs_logger.error(
                 "Failed to store evaluation results for application %s: %s",
@@ -302,19 +293,12 @@ class EvaluationController:
         dataset_info: Dict[str, Any]
     ) -> Dict[str, Any]:
         try:
-            bs_logger.info("Processing single application for evaluation %s using multi-agent architecture", evaluation_id)
-
             criterion_evaluation_results = []
 
             # Let us evaluate all criteria one by one
             rubric = grading_info.get('rubric', {})
             criteria_details = rubric.get('criteriaDetails', [])
-            
-            for index, criterion in enumerate(criteria_details):
-                # Process only the index=1 , skip others
-                if index != 4:
-                    continue
-
+            for criterion in criteria_details:
                 name = criterion.get('name', '')
                 description = criterion.get('description', '')
                 weight = criterion.get('weight', '')
@@ -327,80 +311,22 @@ class EvaluationController:
                     'levels': levels
                 }
 
-                print(f"Processing criterion: {name}")
-
                 agent = CriterionEvaluationAgent(name, criterion_details)
                 agent_result = await agent.evaluate_criterion(
                     application_data=application_data,
                     dataset_context=dataset_info
                 )
-                # bs_logger.info(f"Evaluation result for criterion: {name} - {agent_result}")
                 criterion_evaluation_results.append(agent_result)
+            
+            # Store the criterion evaluation results
+            await self._store_evaluation_results({
+                "criterion_evaluation_results": criterion_evaluation_results
+            })
 
             return {
                 "success": True,
                 "criterion_evaluation_results": criterion_evaluation_results
             }
-
-            # Initialize the orchestrator
-            # orchestrator = MultiAgentEvaluationOrchestrator()
-            
-            # evaluation_results = await orchestrator.evaluate_all_criteria(
-            #     application_data=application_data,
-            #     grading_info=grading_info,
-            #     dataset_info=dataset_info
-            # )
-            
-            # if not evaluation_results.get('success'):
-            #     raise Exception(f"Multi-agent evaluation failed: {evaluation_results.get('error')}")
-            
-            # # Extract key results
-            # merged_evaluation = evaluation_results.get('merged_evaluation', {})
-            # individual_evaluations = evaluation_results.get('individual_evaluations', [])
-            
-            # # Calculate final grade based on weighted scores
-            # final_score = merged_evaluation.get('final_score', 0)
-            # grade = self._calculate_grade(final_score)
-            
-            # # Prepare detailed results
-            # detailed_results = {
-            #     "evaluation_id": evaluation_id,
-            #     "application_id": application_data.get("id", "unknown"),
-            #     "applicant_name": application_data.get("name", "Unknown"),
-            #     "final_score": final_score,
-            #     "grade": grade,
-            #     "evaluation_method": "multi_agent_architecture",
-            #     "total_criteria_evaluated": evaluation_results.get('total_criteria_evaluated', 0),
-            #     "criterion_scores": merged_evaluation.get('criterion_scores', {}),
-            #     "merged_evaluation": merged_evaluation.get('merged_evaluation', ''),
-            #     "individual_criterion_evaluations": individual_evaluations,
-            #     "evaluated_at": evaluation_results.get('evaluation_timestamp'),
-            #     "success": True
-            # }
-            
-            # # Log summary of evaluation
-            # bs_logger.info(
-            #     "Multi-agent evaluation completed - Application: %s, Final Score: %.2f, Grade: %s, Criteria Evaluated: %d",
-            #     application_data.get("id", "unknown"),
-            #     final_score,
-            #     grade,
-            #     len(individual_evaluations)
-            # )
-            
-            # # Log individual criterion scores
-            # for criterion_eval in individual_evaluations:
-            #     bs_logger.info(
-            #         "  Criterion '%s' (weight: %.2f): Score = %.1f",
-            #         criterion_eval.get('criterion'),
-            #         criterion_eval.get('weight', 1.0),
-            #         criterion_eval.get('score', 0)
-            #     )
-            
-            # # Store results in database if needed
-            # if self.results_collection:
-            #     await self._store_evaluation_results(detailed_results)
-            
-            return {}
 
         except Exception as error:
             bs_logger.error("Error in multi-agent processing for application: %s", str(error))
