@@ -22,3 +22,10 @@ CLOUDFLARE_ACCOUNT_ID = os.environ.get('CLOUDFLARE_ACCOUNT_ID')
 
 # Firebase configs
 FIREBASE_SERVICE_ACCOUNT_KEY_LOCATION = os.environ.get('FIREBASE_SERVICE_ACCOUNT_KEY_LOCATION')
+
+# Firecrawl API key
+FIRECRAWL_API_KEY = os.environ.get('FIRECRAWL_API_KEY')
+
+# Google API key
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+GOOGLE_CSE_ID = os.environ.get('GOOGLE_CSE_ID')

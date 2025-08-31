@@ -2,19 +2,18 @@
 Evaluation API routes for the Gradix platform
 """
 
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Dict, Any, Optional, List
 
-from controllers.dataset_controller import EvaluationController
-from services.evaluation_service import EvaluationService
+from controllers.evaluation_controller import EvaluationController
 from logger.bs_logger import bs_logger
 
 router = APIRouter()
 
 # Initialize controllers and services
 evaluation_controller = EvaluationController()
-evaluation_service = EvaluationService()
 
 
 # Pydantic models for request/response validation
