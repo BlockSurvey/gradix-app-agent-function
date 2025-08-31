@@ -276,8 +276,6 @@ class EvaluationController:
             }
             
             self.db.collection(self.results_collection).document(result_id).set(results_doc)
-
-            print(f"Evaluation results stored successfully: ------------------")
         except Exception as e:
             bs_logger.error(
                 "Failed to store evaluation results for application %s: %s",
