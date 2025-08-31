@@ -26,6 +26,9 @@ from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchRun
 from config import LLM_MODEL_DEFAULT, OPENAI_API_KEY
 from logger.bs_logger import bs_logger
 
+from bs4 import BeautifulSoup
+import requests
+
 
 class CriterionEvaluationAgent:
     """Agent responsible for evaluating a single criterion"""
@@ -82,100 +85,158 @@ class CriterionEvaluationAgent:
     
     async def _setup_langchain_tools(self):
         """Set up LangChain default tools"""
-        # search = GoogleSearchAPIWrapper()
+        
+        # # web_crawl_tool
+        # def web_crawl_tool(url: str) -> str:
+        #     """Crawl a website and extract content using FireCrawl"""
+        #     try:
+        #         from config import FIRECRAWL_API_KEY
+        #         loader = FireCrawlLoader(
+        #             api_key=FIRECRAWL_API_KEY,
+        #             url=url,
+        #             mode="crawl"
+        #         )
+        #         docs = loader.load()
+        #         return "\n".join([doc.page_content for doc in docs])
+        #     except Exception as e:
+        #         return f"Error crawling website: {str(e)}"
 
-        # google_search_tool = Tool(
-        #     name="google_search",
-        #     description="Search Google for recent results.",
-        #     func=search.run,
+        # firecrawl_tool = Tool(
+        #     name="web_crawl",
+        #     description="Crawl and extract content from websites using FireCrawl. Input should be a valid URL.",
+        #     func=web_crawl_tool,
         # )
 
-        # web_search_tool
-        search_tool = DuckDuckGoSearchRun()
-        web_search_tool = Tool(
-            name="web_search",
-            description="Search the web for information. Input should be a search query string.",
-            func=search_tool.run,
+        def simple_scraper(url: str) -> str:
+            """Scrape website content with URL cleaning"""
+            try:
+                # Clean the URL - remove quotes, commas, and whitespace
+                cleaned_url = url.strip()
+                # Remove surrounding quotes if present
+                if cleaned_url.startswith('"') and cleaned_url.endswith('"'):
+                    cleaned_url = cleaned_url[1:-1]
+                elif cleaned_url.startswith("'") and cleaned_url.endswith("'"):
+                    cleaned_url = cleaned_url[1:-1]
+                # Remove trailing comma if present
+                if cleaned_url.endswith(','):
+                    cleaned_url = cleaned_url[:-1]
+                # Remove any remaining whitespace
+                cleaned_url = cleaned_url.strip()
+                
+                # Validate URL format
+                if not cleaned_url.startswith(('http://', 'https://')):
+                    return f"Error: Invalid URL format. URL must start with http:// or https://. Got: {cleaned_url}"
+                
+                # Make the request with timeout
+                response = requests.get(cleaned_url, timeout=30)
+                response.raise_for_status()
+                
+                # Parse with BeautifulSoup
+                soup = BeautifulSoup(response.text, "html.parser")
+                
+                # Remove unnecessary tags like nav, footer, script, style
+                for tag in soup.select("nav, footer, script, style"):
+                    tag.decompose()
+                    
+                # Get clean text
+                text = soup.get_text(separator="\n").strip()
+                
+                # Limit response size
+                if len(text) > 10000:
+                    text = text[:10000] + "\n... (truncated)"
+                    
+                return text
+                
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching URL '{cleaned_url}': {str(e)}"
+            except Exception as e:
+                return f"Error processing URL '{url}': {str(e)}"
+
+        scraper_tool = Tool(
+            name="BeautifulSoup Web Scraper",
+            func=simple_scraper,
+            description=(
+                "Scrapes the given URL and returns clean text content. "
+                "The URL should be a valid HTTP/HTTPS URL. "
+                "Automatically cleans the URL by removing quotes, commas, and extra whitespace."
+            ),
         )
 
-        # web_crawl_tool
-        def web_crawl_tool(url: str) -> str:
-            """Crawl a website and extract content using FireCrawl"""
+        # GitHub repository analyzer tool for public repos
+        def analyze_github_repo(repo_url: str) -> str:
+            """Analyze a GitHub repository and extract key information"""
             try:
-                from config import FIRECRAWL_API_KEY
-                loader = FireCrawlLoader(
-                    api_key=FIRECRAWL_API_KEY,
-                    url=url,
-                    mode="crawl"
-                )
-                docs = loader.load()
-                return "\n".join([doc.page_content for doc in docs])
-            except Exception as e:
-                return f"Error crawling website: {str(e)}"
-
-        firecrawl_tool = Tool(
-            name="web_crawl",
-            description="Crawl and extract content from websites using FireCrawl. Input should be a valid URL.",
-            func=web_crawl_tool,
-        )
-
-        # Skip Playwright tools in async environments to avoid event loop conflicts
-        # Instead, create simple web scraping tool using aiohttp
-        async def async_web_fetch(url: str) -> str:
-            """Fetch web content asynchronously"""
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                        if response.status == 200:
-                            html = await response.text()
-                            soup = BeautifulSoup(html, 'html.parser')
-                            # Remove script and style elements
-                            for script in soup(["script", "style"]):
-                                script.decompose()
-                            text = soup.get_text()
-                            # Clean up text
-                            lines = (line.strip() for line in text.splitlines())
-                            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                            text = ' '.join(chunk for chunk in chunks if chunk)
-                            return text[:5000]  # Limit to first 5000 chars
-                        else:
-                            return f"Error: HTTP {response.status}"
-            except Exception as e:
-                return f"Error fetching URL: {str(e)}"
-        
-        # Create synchronous wrapper for async web fetch
-        import asyncio
-        def web_fetch_sync(url: str) -> str:
-            """Synchronous wrapper for async web fetch"""
-            try:
-                # Check if there's already a running event loop
+                import requests
+                import re
+                
+                # Clean the URL
+                cleaned_url = repo_url.strip()
+                if cleaned_url.startswith('"') and cleaned_url.endswith('"'):
+                    cleaned_url = cleaned_url[1:-1]
+                elif cleaned_url.startswith("'") and cleaned_url.endswith("'"):
+                    cleaned_url = cleaned_url[1:-1]
+                cleaned_url = cleaned_url.strip()
+                
+                # Extract owner and repo from GitHub URL
+                github_pattern = r'github\.com/([^/]+)/([^/]+)'
+                match = re.search(github_pattern, cleaned_url)
+                
+                if not match:
+                    return f"Error: Invalid GitHub URL format. Expected format: https://github.com/owner/repo"
+                
+                owner, repo = match.groups()
+                # Remove .git suffix if present
+                repo = repo.replace('.git', '')
+                
+                # Use GitHub API to get repository information
+                api_url = f"https://api.github.com/repos/{owner}/{repo}"
+                
+                response = requests.get(api_url, timeout=30)
+                response.raise_for_status()
+                
+                repo_data = response.json()
+                
+                # Extract key information
+                info = []
+                info.append(f"Repository: {repo_data.get('full_name', 'N/A')}")
+                info.append(f"Description: {repo_data.get('description', 'No description')}")
+                info.append(f"Language: {repo_data.get('language', 'Not specified')}")
+                info.append(f"Stars: {repo_data.get('stargazers_count', 0)}")
+                info.append(f"Forks: {repo_data.get('forks_count', 0)}")
+                info.append(f"Open Issues: {repo_data.get('open_issues_count', 0)}")
+                info.append(f"Created: {repo_data.get('created_at', 'N/A')}")
+                info.append(f"Last Updated: {repo_data.get('updated_at', 'N/A')}")
+                info.append(f"Size: {repo_data.get('size', 0)} KB")
+                
+                # Get README content if available
                 try:
-                    loop = asyncio.get_running_loop()
-                    # If we're in an async context, create a task
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, async_web_fetch(url))
-                        return future.result(timeout=30)
-                except RuntimeError:
-                    # No running loop, we can use asyncio.run
-                    return asyncio.run(async_web_fetch(url))
+                    readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
+                    readme_response = requests.get(readme_url, timeout=30)
+                    if readme_response.status_code == 200:
+                        readme_data = readme_response.json()
+                        import base64
+                        readme_content = base64.b64decode(readme_data['content']).decode('utf-8')
+                        # Limit README content
+                        if len(readme_content) > 2000:
+                            readme_content = readme_content[:2000] + "\n... (truncated)"
+                        info.append(f"\nREADME Content:\n{readme_content}")
+                except:
+                    info.append("\nREADME: Not available or could not be fetched")
+                
+                return "\n".join(info)
+                
+            except requests.exceptions.RequestException as e:
+                return f"Error fetching GitHub repository '{repo_url}': {str(e)}"
             except Exception as e:
-                return f"Error in web fetch: {str(e)}"
+                return f"Error analyzing GitHub repository '{repo_url}': {str(e)}"
 
-        web_fetch_tool = Tool(
-            name="web_fetch",
-            description="Fetch and extract text content from a webpage. Input should be a valid URL.",
-            func=web_fetch_sync,
+        github_analyzer_tool = Tool(
+            name="github_analyzer",
+            description="Analyze a GitHub repository and extract key information including description, language, stats, and README content. Provide the full GitHub repository URL.",
+            func=analyze_github_repo,
         )
-
-        # github_analyzer tool - only if credentials are available
-        try:
-            github = GitHubAPIWrapper()
-            toolkit = GitHubToolkit.from_github_api_wrapper(github)
-            github_tools = toolkit.get_tools()
-        except Exception as e:
-            bs_logger.warning(f"GitHub tools not available: {str(e)}")
-            github_tools = []
+        
+        github_tools = [github_analyzer_tool]
 
         # python_repl tool
         python_repl = PythonREPL()
@@ -185,12 +246,21 @@ class CriterionEvaluationAgent:
             func=python_repl.run,
         )
 
-        # Data analysis tool
+        # Data analysis tool with input cleaning
         def analyze_json_data(json_str: str) -> str:
             """Analyze JSON data structure and provide insights"""
             try:
                 import json
-                data = json.loads(json_str)
+                
+                # Clean the input - remove surrounding quotes if present
+                cleaned_input = json_str.strip()
+                if cleaned_input.startswith('"') and cleaned_input.endswith('"'):
+                    cleaned_input = cleaned_input[1:-1]
+                elif cleaned_input.startswith("'") and cleaned_input.endswith("'"):
+                    cleaned_input = cleaned_input[1:-1]
+                
+                # Try to parse as JSON
+                data = json.loads(cleaned_input)
                 
                 analysis = []
                 analysis.append(f"Data type: {type(data).__name__}")
@@ -204,29 +274,24 @@ class CriterionEvaluationAgent:
                         analysis.append(f"First item keys: {', '.join(data[0].keys())}")
                 
                 return "\n".join(analysis)
+            except json.JSONDecodeError as e:
+                return f"Error parsing JSON: {str(e)}. Input: {json_str[:100]}..."
             except Exception as e:
                 return f"Error analyzing JSON: {str(e)}"
         
         json_analyzer_tool = Tool(
             name="json_analyzer",
-            description="Analyze JSON data structure to understand its content and organization.",
+            description="Analyze JSON data structure to understand its content and organization. Automatically cleans input by removing surrounding quotes.",
             func=analyze_json_data,
         )
 
         self.tools = [
-            # google_search_tool, 
-            web_search_tool,
-            firecrawl_tool,
-            web_fetch_tool,
+            scraper_tool,
+            github_tools,
             json_analyzer_tool,
-            repl_tool
+            repl_tool,
         ]
-        
-        # Add GitHub tools if available
-        if github_tools:
-            self.tools.extend(github_tools)
 
-    
     def _format_levels(self) -> str:
         """Format the criterion levels for the prompt"""
         levels = self.criterion_details.get('levels', [])
@@ -246,16 +311,6 @@ class CriterionEvaluationAgent:
         application_data: Dict[str, Any],
         dataset_context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """
-        Evaluate the application for this specific criterion using LangChain agent with tools
-        
-        Args:
-            application_data: The application data to evaluate
-            dataset_context: Optional dataset context
-            
-        Returns:
-            Evaluation results for this criterion
-        """
         try:
             from langchain.agents import AgentExecutor, create_react_agent
             from langchain.prompts import PromptTemplate
@@ -272,52 +327,66 @@ class CriterionEvaluationAgent:
                 else:
                     flat_tools.append(tool)
             
-            # Create memory for the agent
+            # Create memory for the agent with proper output key configuration
             memory = ConversationBufferMemory(
                 memory_key="chat_history",
-                return_messages=True
+                return_messages=True,
+                output_key="output"  # Explicitly set output key to avoid warning
             )
             
-            # Create the ReAct agent prompt
-            agent_prompt = PromptTemplate.from_template("""
-            {system_prompt}
+            # Prepare all context as a single formatted string
+            formatted_context = f"""
+SYSTEM CONTEXT:
+{self.system_prompt}
+
+APPLICATION DATA:
+{json.dumps(application_data, indent=2)}
+
+DATASET CONTEXT:
+{json.dumps(dataset_context, indent=2) if dataset_context else "No dataset context provided"}
+
+CRITERION TO EVALUATE: {self.criterion_name}
+"""
             
-            You have access to the following tools:
-            {tools}
-            
-            Use the following format:
-            
-            Thought: Consider what you need to evaluate for the criterion
-            Action: the action to take, should be one of [{tool_names}]
-            Action Input: the input to the action
-            Observation: the result of the action
-            ... (this Thought/Action/Action Input/Observation can repeat N times)
-            Thought: I have gathered enough information to evaluate the criterion
-            Final Answer: The complete evaluation with score, justification, evidence, strengths, weaknesses, and recommendations
-            
-            APPLICATION DATA:
-            {application_data}
-            
-            DATASET CONTEXT:
-            {dataset_context}
-            
-            Chat History:
-            {chat_history}
-            
-            Question: Evaluate this application SPECIFICALLY for the '{criterion_name}' criterion. 
-            
-            OUTPUT FORMAT: You must return your response in the following JSON format:
-            {
-                "grade_score": 1, // Numerical score for the given criterion level between 1 to 5
-                "grade_evidence": [], // List of evidence for the given criterion level as string array
-                "grade_feedback": "", // Detailed feedback why the application is graded with the given score
-            }
-            
-            Begin evaluation:
-            {input}
-            
-            {agent_scratchpad}
-            """)
+            # Create the ReAct agent prompt with single input variable
+            prompt_template = """You are evaluating an application for a specific criterion. Here is the full context:
+
+{input}
+
+You have access to the following tools:
+
+{tools}
+
+Use the following format:
+
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+IMPORTANT: 
+1. Always follow the exact format above. Each line must start with either "Thought:", "Action:", "Action Input:", "Observation:", or "Final Answer:".
+2. Your Final Answer MUST be a valid JSON object with this structure:
+{{
+    "grade_score": <number between 1-5>,
+    "grade_evidence": [<list of specific evidence strings>],
+    "grade_feedback": "<detailed feedback explaining the grade>"
+}}
+
+Previous conversation:
+{chat_history}
+
+Begin! Remember to always use the exact format specified above.
+
+{agent_scratchpad}"""
+
+            agent_prompt = PromptTemplate(
+                input_variables=["input", "tools", "tool_names", "agent_scratchpad", "chat_history"],
+                template=prompt_template
+            )
             
             # Create the ReAct agent
             agent = create_react_agent(
@@ -326,32 +395,46 @@ class CriterionEvaluationAgent:
                 prompt=agent_prompt
             )
             
-            # Create the agent executor
+            # Create the agent executor with better error handling
             agent_executor = AgentExecutor(
                 agent=agent,
                 tools=flat_tools,
                 memory=memory,
                 verbose=True,
-                max_iterations=10,
+                max_iterations=10,  # Reduced to prevent infinite loops
                 handle_parsing_errors=True,
-                return_intermediate_steps=True
+                return_intermediate_steps=True,
+                max_execution_time=60  # Add timeout
             )
             
-            # Prepare the input for the agent
-            agent_input = {
-                "system_prompt": self.system_prompt,
-                "application_data": json.dumps(application_data, indent=2),
-                "dataset_context": json.dumps(dataset_context, indent=2) if dataset_context else "No dataset context provided",
-                "criterion_name": self.criterion_name,
-                "input": f"Please evaluate the application for the '{self.criterion_name}' criterion. Use the available tools to gather comprehensive evidence and perform detailed analysis."
-            }
-            
-            # Execute the agent
-            result = await agent_executor.ainvoke(agent_input)
+            # Prepare single input string with all context and instructions
+            evaluation_request = f"""{formatted_context}
+
+TASK: Please evaluate the application for the '{self.criterion_name}' criterion.
+
+INSTRUCTIONS:
+1. Use the available tools to gather evidence about the application
+2. Analyze how well the application meets the criterion requirements  
+3. Assign a score from 1-5 based on the criterion levels:
+   - 5 = Exceptional (Exceeds all requirements)
+   - 4 = Strong (Meets all requirements with high quality)
+   - 3 = Satisfactory (Meets core requirements)
+   - 2 = Below Average (Partially meets requirements)
+   - 1 = Poor (Fails to meet requirements)
+4. Provide specific evidence supporting your score
+5. Write detailed feedback explaining your evaluation
+
+Remember: Your Final Answer must be a valid JSON object."""
+
+            # Execute the agent with single input
+            result = await agent_executor.ainvoke({"input": evaluation_request})
             
             # Extract the evaluation from the result
             evaluation_text = result.get("output", "")
             intermediate_steps = result.get("intermediate_steps", [])
+            
+            # Try to parse JSON from the evaluation text
+            evaluation_data = self._parse_evaluation_json(evaluation_text)
             
             # Format tool usage evidence
             tool_evidence = []
@@ -367,7 +450,9 @@ class CriterionEvaluationAgent:
                 "criterion": self.criterion_name,
                 "weight": self.criterion_details.get('weight', 1.0),
                 "evaluation": evaluation_text,
-                "score": self._extract_score(evaluation_text),
+                "grade_score": evaluation_data.get("grade_score", self._extract_score(evaluation_text)),
+                "grade_evidence": evaluation_data.get("grade_evidence", []),
+                "grade_feedback": evaluation_data.get("grade_feedback", evaluation_text),
                 "tool_evidence": tool_evidence,
                 "evaluated_at": datetime.now().isoformat(),
                 "agent_type": "criterion_specific_with_tools",
@@ -391,7 +476,6 @@ class CriterionEvaluationAgent:
                     "evaluation": f"Failed to evaluate {self.criterion_name} due to technical error"
                 }
 
-    
     async def _fallback_evaluation(
         self,
         application_data: Dict[str, Any],
@@ -422,34 +506,35 @@ class CriterionEvaluationAgent:
             human_prompt = f"""
             Evaluate this application SPECIFICALLY for the '{self.criterion_name}' criterion.
             
-            REQUIRED OUTPUT FORMAT:
-            
-            1. SCORE (1-5): Assign a numerical score based on the defined levels
-            
-            2. LEVEL JUSTIFICATION:
-               - Which level does this application achieve?
-               - What specific requirements does it meet or fail to meet?
-            
-            3. EVIDENCE:
-               - List 3-5 specific pieces of evidence from the application
-               - Quote or reference exact data points
-            
-            4. STRENGTHS (for this criterion only):
-               - What does the application do well regarding {self.criterion_name}?
-               - Specific examples of excellence
-            
-            5. WEAKNESSES (for this criterion only):
-               - What aspects of {self.criterion_name} need improvement?
-               - Specific gaps or issues
-            
-            6. RECOMMENDATIONS:
-               - How can the applicant improve on {self.criterion_name}?
-               - Specific, actionable suggestions
-            
             APPLICATION CONTEXT:
             {context}
             
+            REQUIRED OUTPUT FORMAT:
+            You must provide your evaluation as a JSON object with this exact structure:
+            {{
+                "grade_score": <number between 1-5>,
+                "grade_evidence": [<list of specific evidence strings from the application>],
+                "grade_feedback": "<detailed feedback explaining why this grade was assigned>"
+            }}
+            
+            EVALUATION GUIDELINES:
+            1. SCORE (1-5): Assign a numerical score based on the criterion levels where:
+               - 5 = Exceptional (Exceeds all requirements)
+               - 4 = Strong (Meets all requirements with high quality)
+               - 3 = Satisfactory (Meets core requirements)
+               - 2 = Below Average (Partially meets requirements)
+               - 1 = Poor (Fails to meet requirements)
+            
+            2. EVIDENCE: List 3-5 specific pieces of evidence from the application that support your score
+            
+            3. FEEDBACK: Provide detailed feedback that includes:
+               - What the application does well regarding {self.criterion_name}
+               - What aspects need improvement
+               - Specific recommendations for enhancement
+            
             Remember: Focus ONLY on {self.criterion_name}. Do not evaluate other aspects.
+            
+            Provide your evaluation as a valid JSON object:
             """
             
             messages = [
@@ -458,12 +543,27 @@ class CriterionEvaluationAgent:
             ]
             
             response = await self.llm.ainvoke(messages)
+            response_text = response.content.strip()
+            
+            # Try to parse the JSON response
+            evaluation_data = self._parse_evaluation_json(response_text)
+            
+            # If JSON parsing failed, create structured data from text
+            if not evaluation_data or 'grade_score' not in evaluation_data:
+                score = self._extract_score(response_text)
+                evaluation_data = {
+                    "grade_score": score,
+                    "grade_evidence": [],
+                    "grade_feedback": response_text
+                }
             
             return {
                 "criterion": self.criterion_name,
                 "weight": self.criterion_details.get('weight', 1.0),
-                "evaluation": response.content.strip(),
-                "score": self._extract_score(response.content),
+                "evaluation": response_text,
+                "grade_score": evaluation_data.get("grade_score", 3),
+                "grade_evidence": evaluation_data.get("grade_evidence", []),
+                "grade_feedback": evaluation_data.get("grade_feedback", response_text),
                 "evaluated_at": datetime.now().isoformat(),
                 "agent_type": "criterion_specific_fallback",
                 "model_used": LLM_MODEL_DEFAULT,
@@ -500,6 +600,48 @@ class CriterionEvaluationAgent:
         # Default to 3 if no score found
         bs_logger.warning(f"Could not extract score for {self.criterion_name}, defaulting to 3")
         return 3.0
+
+    def _parse_evaluation_json(self, evaluation_text: str) -> Dict[str, Any]:
+        """Parse JSON from evaluation text"""
+        import re
+        import json
+        
+        try:
+            # Try to find JSON in the text
+            json_patterns = [
+                r'\{[^{}]*"grade_score"[^{}]*\}',  # Simple JSON object
+                r'\{.*?"grade_score".*?\}(?=\s*$)',  # JSON at end
+                r'```json\s*(.*?)\s*```',  # JSON in code block
+                r'```\s*(.*?)\s*```',  # JSON in generic code block
+            ]
+            
+            for pattern in json_patterns:
+                matches = re.findall(pattern, evaluation_text, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    for match in matches:
+                        try:
+                            # Clean up the match
+                            json_str = match.strip()
+                            if json_str.startswith('```'):
+                                json_str = json_str[3:]
+                            if json_str.endswith('```'):
+                                json_str = json_str[:-3]
+                            if json_str.startswith('json'):
+                                json_str = json_str[4:]
+                            
+                            # Parse the JSON
+                            data = json.loads(json_str)
+                            if isinstance(data, dict) and 'grade_score' in data:
+                                return data
+                        except json.JSONDecodeError:
+                            continue
+            
+            # If no JSON found, try to extract directly from text
+            return {}
+            
+        except Exception as e:
+            bs_logger.warning(f"Could not parse JSON from evaluation: {str(e)}")
+            return {}
 
 
 class MultiAgentEvaluationOrchestrator:

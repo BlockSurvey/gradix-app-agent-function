@@ -312,7 +312,7 @@ class EvaluationController:
             
             for index, criterion in enumerate(criteria_details):
                 # Process only the index=1 , skip others
-                if index != 1:
+                if index != 4:
                     continue
 
                 name = criterion.get('name', '')
@@ -327,12 +327,14 @@ class EvaluationController:
                     'levels': levels
                 }
 
+                print(f"Processing criterion: {name}")
+
                 agent = CriterionEvaluationAgent(name, criterion_details)
                 agent_result = await agent.evaluate_criterion(
                     application_data=application_data,
                     dataset_context=dataset_info
                 )
-                bs_logger.info(f"Evaluation result for criterion: {name} - {agent_result}")
+                # bs_logger.info(f"Evaluation result for criterion: {name} - {agent_result}")
                 criterion_evaluation_results.append(agent_result)
 
             return {

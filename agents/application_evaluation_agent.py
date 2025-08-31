@@ -81,13 +81,13 @@ class ApplicationEvaluationAgent:
         - Process data files and structures systematically.
 
         OUTPUT FORMAT: You must return your response in the following JSON format:
-        {
+        {{
             "grade_score": 1, // Numerical score for the given criterion level between 1 to 5
             "grade_feedback": "", // Detailed feedback why the application is graded with the given score
-            "tool_evidence": {}, // Evidence gathered from various tools
-            "quantitative_analysis": {}, // Results from Python calculations if applicable
+            "tool_evidence": {{}}, // Evidence gathered from various tools
+            "quantitative_analysis": {{}}, // Results from Python calculations if applicable
             "comprehensive_assessment": "" // Overall comprehensive assessment
-        }"""
+        }}"""
 
     async def _setup_langchain_tools(self):
         """Set up LangChain default tools"""
